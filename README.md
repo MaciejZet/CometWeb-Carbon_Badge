@@ -7,8 +7,11 @@ Powered by [CometWeb](https://cometweb.io) & **SWDM v4** (Sustainable Web Design
 
 ### Script Tag (CDN)
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@cometweb/carbon-badge"></script>
-<cometweb-carbon-badge></cometweb-carbon-badge>
+<!-- Use explicit version for stability -->
+<script type="module" src="https://unpkg.com/@cometweb/carbon-badge@1.0.0/dist/cometweb-carbon-badge.esm.js"></script>
+
+<!-- Place where you want the badge to appear -->
+<cometweb-carbon-badge theme="dark"></cometweb-carbon-badge>
 ```
 
 ### NPM
