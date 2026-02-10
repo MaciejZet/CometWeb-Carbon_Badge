@@ -38,7 +38,10 @@
     "homepage": "https://cometweb.io",
     "repository": {
         "type": "git",
-        "url": "https://github.com/cometweb/carbon-badge"
+        "url": "https://github.com/MaciejZet/CometWeb-Carbon_Badge.git"
+    },
+    "publishConfig": {
+        "access": "public"
     },
     "devDependencies": {
         "@rollup/plugin-typescript": "^12.1.0",
