@@ -245,7 +245,7 @@ export class CometWebCarbonBadge extends HTMLElement {
         this.shadow.innerHTML = `
       <style>${styles}</style>
       <a class="cw-badge ${themeClass}"
-         href="https://cometweb.io/ecology?ref=badge"
+         href="https://cometweb.io/insight/ecology"
          target="_blank"
          rel="noopener noreferrer"
          role="status"

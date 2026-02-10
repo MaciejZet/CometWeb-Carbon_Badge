@@ -14,6 +14,33 @@ Powered by [CometWeb](https://cometweb.io) & **SWDM v4** (Sustainable Web Design
 <cometweb-carbon-badge theme="dark"></cometweb-carbon-badge>
 ```
 
+### Pro Tip: Lazy Loading (Performance)
+To load the script only when the badge becomes visible (improves PageSpeed):
+
+```html
+<cometweb-carbon-badge theme="dark"></cometweb-carbon-badge>
+
+<!-- Optimization Script -->
+<script>
+    (function () {
+        var el = document.querySelector('cometweb-carbon-badge');
+        if (!el) return;
+        var src = 'https://unpkg.com/@cometweb/carbon-badge@1.0.0/dist/cometweb-carbon-badge.esm.js';
+        var io = new IntersectionObserver(function (entries) {
+            var e = entries[0];
+            if (!e.isIntersecting) return;
+            io.disconnect();
+            var s = document.createElement('script');
+            s.type = 'module';
+            s.src = src;
+            document.body.appendChild(s);
+        }, { rootMargin: '200px', threshold: 0 });
+        io.observe(el);
+    })();
+</script>
+<link rel="preconnect" href="https://unpkg.com" crossorigin />
+```
+
 ### NPM
 ```bash
 npm install @cometweb/carbon-badge
