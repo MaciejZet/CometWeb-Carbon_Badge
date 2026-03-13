@@ -30,6 +30,8 @@ export interface APIResponse {
     cleaner_than: number;
     page_weight_kb: number;
     green_host: boolean;
+    eco_badge_eligible?: boolean;
+    eco_badge_threshold_grams?: number;
     cached: boolean;
     ttl: number;
 }

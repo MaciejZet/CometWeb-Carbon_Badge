@@ -22,6 +22,26 @@ import { getStyles } from './styles';
 const DEFAULT_API_URL = 'https://api.cometweb.io/api';
 const DEFAULT_CACHE_TTL = 720; // 12 hours in minutes
 const MAX_RETRIES = 3;
+const API_TIMEOUT_MS = 5000;
+const ALLOWED_SCORES: ScoreLetter[] = ['A+', 'A', 'B', 'C', 'D', 'F'];
+
+function toFiniteNumber(value: unknown, fallback: number): number {
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 const I18N: Record<string, Record<string, string>> = {
     en: {
@@ -166,11 +186,19 @@ export class CometWebCarbonBadge extends HTMLElement {
     private async fetchFromAPI(url: string) {
         try {
             const params = new URLSearchParams({ url });
+            params.set('source', 'badge');
             if (this.apiKey) params.set('api_key', this.apiKey);
 
-            const response = await fetch(`${this.apiUrl}/public/carbon-badge?${params}`, {
-                headers: { 'Accept': 'application/json' },
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+            const response = await fetch(
+                `${this.apiUrl}/public/carbon-badge?${params}`,
+                {
+                    headers: { 'Accept': 'application/json' },
+                    signal: controller.signal,
+                },
+            ).finally(() => clearTimeout(timeoutId));
 
             if (response.status === 429) {
                 const retryAfter = parseInt(response.headers.get('Retry-After') || '0', 10);
@@ -184,6 +212,7 @@ export class CometWebCarbonBadge extends HTMLElement {
                     return;
                 }
 
+                console.warn('[CometWeb Carbon Badge] API rate limited, falling back to estimate mode.');
                 this.runEstimate();
                 return;
             }
@@ -193,13 +222,16 @@ export class CometWebCarbonBadge extends HTMLElement {
             }
 
             const apiData: APIResponse = await response.json();
+            const score = ALLOWED_SCORES.includes(apiData.score as ScoreLetter)
+                ? (apiData.score as ScoreLetter)
+                : 'F';
 
             this.data = {
                 url: apiData.url,
-                co2Grams: apiData.co2_grams,
-                score: apiData.score as ScoreLetter,
-                cleanerThan: apiData.cleaner_than,
-                pageWeightKb: apiData.page_weight_kb,
+                co2Grams: Math.max(0, toFiniteNumber(apiData.co2_grams, 0)),
+                score,
+                cleanerThan: clamp(toFiniteNumber(apiData.cleaner_than, 0), 0, 100),
+                pageWeightKb: Math.max(0, toFiniteNumber(apiData.page_weight_kb, 0)),
                 greenHost: apiData.green_host,
                 timestamp: Date.now(),
             };
@@ -207,7 +239,12 @@ export class CometWebCarbonBadge extends HTMLElement {
             setCache(url, this.data);
             this.retryCount = 0;
             this.renderBadge();
-        } catch {
+        } catch (error) {
+            const isAbort = error instanceof DOMException && error.name === 'AbortError';
+            if (isAbort) {
+                console.warn('[CometWeb Carbon Badge] API request timed out, falling back to estimate mode.');
+            }
+
             if (this.retryCount < MAX_RETRIES) {
                 this.retryCount++;
                 this.runEstimate();
@@ -221,13 +258,18 @@ export class CometWebCarbonBadge extends HTMLElement {
 
     private renderLoading() {
         const styles = getStyles(this.theme);
+                const safeAriaLoading = escapeHtml(this.t('ariaLoading'));
+                const safeLoading = escapeHtml(this.t('loading'));
+                const safePoweredBy = escapeHtml(this.t('poweredBy'));
         this.shadow.innerHTML = `
       <style>${styles}</style>
-      <div class="cw-badge loading" role="status" aria-label="${this.t('ariaLoading')}" aria-live="polite">
-        <div class="cw-grade grade-unknown">…</div>
-        <div class="cw-content">
-          <div class="cw-title">${this.t('loading')}</div>
-          <div class="cw-subtitle">${this.t('poweredBy')}</div>
+      <div role="status" aria-live="polite" aria-label="${safeAriaLoading}">
+        <div class="cw-badge loading">
+          <div class="cw-grade grade-unknown" aria-hidden="true">…</div>
+          <div class="cw-content">
+            <div class="cw-title">${safeLoading}</div>
+            <div class="cw-subtitle">${safePoweredBy}</div>
+          </div>
         </div>
       </div>
     `;
@@ -236,56 +278,72 @@ export class CometWebCarbonBadge extends HTMLElement {
     private renderBadge() {
         if (!this.data) return;
 
-        const { co2Grams, score, cleanerThan } = this.data;
+        const co2Grams = Math.max(0, toFiniteNumber(this.data.co2Grams, 0));
+        const score = ALLOWED_SCORES.includes(this.data.score) ? this.data.score : 'F';
+        const cleanerThan = clamp(toFiniteNumber(this.data.cleanerThan, 0), 0, 100);
         const styles = getStyles(this.theme);
         const scoreClass = this.getScoreClass(score);
         const co2Display = co2Grams < 0.01 ? '<0.01' : co2Grams.toFixed(2);
+                const safeCo2Display = escapeHtml(co2Display);
+                const safeScore = escapeHtml(score);
+                const safeCleanerThan = escapeHtml(cleanerThan.toString());
+                const safeVisit = escapeHtml(this.t('visit') || 'visit');
+                const safeCleanerPrefix = escapeHtml(this.t('cleanerThanPrefix') || 'Cleaner than');
+                const safeCleanerSuffix = escapeHtml(this.t('cleanerThanSuffix') || 'of web');
+                const safeAria = escapeHtml(this.t('ariaLabel', { co2: co2Display, score }));
         const themeClass = this.theme; // 'dark' or 'light'
 
         this.shadow.innerHTML = `
       <style>${styles}</style>
-      <a class="cw-badge ${themeClass}"
-         href="https://cometweb.io/insight/ecology"
-         target="_blank"
-         rel="noopener noreferrer"
-         role="status"
-         aria-label="${this.t('ariaLabel', { co2: co2Display, score })}"
-         aria-live="polite">
-        <div class="cw-grade ${scoreClass}">${score}</div>
-        <div class="cw-content">
-          <div class="cw-title">${co2Display}g CO₂e <small>/ ${this.t('visit') || 'visit'}</small></div>
-          <div class="cw-subtitle">
-            ${this.t('cleanerThanPrefix') || 'Cleaner than'} <span class="cw-highlight">${cleanerThan}%</span> ${this.t('cleanerThanSuffix') || 'of web'}
+      <div role="status" aria-live="polite" aria-label="${safeAria}">
+        <a class="cw-badge ${themeClass}"
+           href="https://cometweb.io/insight/ecology"
+           target="_blank"
+           rel="noopener noreferrer"
+           aria-label="${safeAria} — CometWeb (opens in new tab)">
+          <div class="cw-grade ${scoreClass}" aria-hidden="true">${safeScore}</div>
+          <div class="cw-content">
+            <div class="cw-title">${safeCo2Display}g CO₂e <small>/ ${safeVisit}</small></div>
+            <div class="cw-subtitle">
+              ${safeCleanerPrefix} <span class="cw-highlight">${safeCleanerThan}%</span> ${safeCleanerSuffix}
+            </div>
           </div>
-        </div>
-        <div class="cw-footer">Verified by CometWeb</div>
-      </a>
+          <div class="cw-footer" aria-hidden="true">Verified by CometWeb</div>
+        </a>
+      </div>
     `;
     }
 
     private renderError() {
         const styles = getStyles(this.theme);
+                const safeAriaError = escapeHtml(this.t('ariaError'));
+                const safeError = escapeHtml(this.t('error'));
+                const safeRetry = escapeHtml(this.t('retry'));
 
         this.shadow.innerHTML = `
       <style>${styles}</style>
-      <div class="cw-badge error" role="status" aria-label="${this.t('ariaError')}" aria-live="polite">
-        <div class="cw-grade grade-f">!</div>
-        <div class="cw-content">
-          <div class="cw-title">${this.t('error')}</div>
-          <div class="cw-error-actions">
-            <button class="cw-retry-btn" aria-label="${this.t('retry')}">${this.t('retry')}</button>
+      <div role="status" aria-live="polite" aria-label="${safeAriaError}">
+        <div class="cw-badge error">
+          <div class="cw-grade grade-f" aria-hidden="true">!</div>
+          <div class="cw-content">
+            <div class="cw-title">${safeError}</div>
+            <div class="cw-error-actions">
+              <button class="cw-retry-btn">${safeRetry}</button>
+            </div>
           </div>
+          <div class="cw-footer" aria-hidden="true">Verified by CometWeb</div>
         </div>
-        <div class="cw-footer">Verified by CometWeb</div>
       </div>
     `;
 
-        const btn = this.shadow.querySelector('.cw-retry-btn');
+        const btn = this.shadow.querySelector<HTMLButtonElement>('.cw-retry-btn');
         if (btn) {
             btn.addEventListener('click', () => {
                 this.retryCount = 0;
                 this.renderLoading();
                 this.loadData();
+                // Return focus to the badge host so keyboard users don't lose context
+                this.focus();
             });
         }
     }

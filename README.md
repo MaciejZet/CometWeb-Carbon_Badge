@@ -8,7 +8,7 @@ Powered by [CometWeb](https://cometweb.io) & **SWDM v4** (Sustainable Web Design
 ### Script Tag (CDN)
 ```html
 <!-- Use explicit version for stability -->
-<script type="module" src="https://unpkg.com/@cometweb/carbon-badge@1.0.0/dist/cometweb-carbon-badge.esm.js"></script>
+<script type="module" src="https://unpkg.com/@cometweb/carbon-badge@1.0.1/dist/cometweb-carbon-badge.esm.js"></script>
 
 <!-- Place where you want the badge to appear -->
 <cometweb-carbon-badge theme="dark"></cometweb-carbon-badge>
@@ -25,7 +25,7 @@ To load the script only when the badge becomes visible (improves PageSpeed):
     (function () {
         var el = document.querySelector('cometweb-carbon-badge');
         if (!el) return;
-        var src = 'https://unpkg.com/@cometweb/carbon-badge@1.0.0/dist/cometweb-carbon-badge.esm.js';
+        var src = 'https://unpkg.com/@cometweb/carbon-badge@1.0.1/dist/cometweb-carbon-badge.esm.js';
         var io = new IntersectionObserver(function (entries) {
             var e = entries[0];
             if (!e.isIntersecting) return;

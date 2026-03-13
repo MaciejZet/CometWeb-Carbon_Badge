@@ -132,6 +132,12 @@ const BASE_STYLES = `
     50% { opacity: 1; }
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .cw-badge.loading .cw-grade { animation: none; }
+    .cw-badge { transition: none; }
+    .cw-grade { transition: none; }
+  }
+
   /* Error State */
   .cw-error-actions {
     margin-top: 4px;
