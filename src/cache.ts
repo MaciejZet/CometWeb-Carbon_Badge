@@ -38,7 +38,8 @@ export function setCache(url: string, data: BadgeData): void {
         const key = CACHE_PREFIX + url;
         const entry: CacheEntry = { data, ts: Date.now() };
         localStorage.setItem(key, JSON.stringify(entry));
-    } catch {
+    } catch (e) {
+        console.warn('[CometWeb Carbon Badge] Cache write failed (localStorage quota or access denied):', e);
     }
 }
 
@@ -63,7 +64,7 @@ export function clearExpired(ttlMinutes: number): void {
                 localStorage.removeItem(key);
             }
         }
-    } catch {
-        // ignore
+    } catch (e) {
+        console.warn('[CometWeb Carbon Badge] Cache cleanup failed:', e);
     }
 }

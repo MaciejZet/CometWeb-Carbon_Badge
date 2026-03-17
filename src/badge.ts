@@ -1,17 +1,8 @@
 /**
  * @cometweb/carbon-badge — Main Web Component
- * 
- * <cometweb-carbon-badge> — Shadow DOM widget showing CO₂e per page view.
- * 
- * Attributes:
- *   url        — URL to analyze (default: current page)
- *   mode       — "api" (default) | "estimate" (client-side)
- *   theme      — "dark" (default) | "light"
- *   lang       — "en" (default) | "pl"
- *   cache-ttl  — cache TTL in minutes (default: 720 = 12h)
- *   api-url    — override API base URL
- *   api-key    — optional API key for higher rate limits
- *   green-host — "true" to override green hosting factor in estimate mode
+ *
+ * Attributes: url, mode ("api"|"estimate"), theme ("dark"|"light"),
+ *   cache-ttl, api-url, api-key, green-host
  */
 
 import type { BadgeData, BadgeTheme, BadgeMode, ScoreLetter, APIResponse } from './types';
@@ -43,49 +34,51 @@ function escapeHtml(value: string): string {
         .replace(/'/g, '&#39;');
 }
 
-const I18N: Record<string, Record<string, string>> = {
-    en: {
-        co2PerVisit: 'CO₂e per visit',
-        visit: 'visit',
-        cleanerThanPrefix: 'Cleaner than',
-        cleanerThanSuffix: 'of web',
-        cleanerThan: 'Cleaner than {pct}% of sites',
-        poweredBy: 'Powered by CometWeb',
-        loading: 'Measuring…',
-        error: 'Unable to calculate',
-        retry: 'Retry',
-        ariaLabel: 'Carbon footprint badge: {co2}g CO₂e per visit, score {score}',
-        ariaLoading: 'Calculating carbon footprint…',
-        ariaError: 'Carbon footprint calculation failed',
-    },
-    pl: {
-        co2PerVisit: 'CO₂e na wizytę',
-        visit: 'wizytę',
-        cleanerThanPrefix: 'Czystsza niż',
-        cleanerThanSuffix: 'stron',
-        cleanerThan: 'Czystsza niż {pct}% stron',
-        poweredBy: 'Powered by CometWeb',
-        loading: 'Pomiar…',
-        error: 'Nie udało się obliczyć',
-        retry: 'Ponów',
-        ariaLabel: 'Odznaka śladu węglowego: {co2}g CO₂e na wizytę, ocena {score}',
-        ariaLoading: 'Obliczanie śladu węglowego…',
-        ariaError: 'Obliczanie śladu węglowego nie powiodło się',
-    },
+const STRINGS: Record<string, string> = {
+    visit: 'visit',
+    cleanerThanPrefix: 'Cleaner than',
+    cleanerThanSuffix: 'of web',
+    poweredBy: 'Powered by CometWeb',
+    loading: 'Measuring…',
+    error: 'Unable to calculate',
+    retry: 'Retry',
+    ariaLabel: 'Carbon footprint: {co2}g CO₂e per visit, score {score}',
+    ariaLoading: 'Calculating carbon footprint…',
+    ariaError: 'Carbon footprint calculation failed',
 };
 
 export class CometWebCarbonBadge extends HTMLElement {
     private shadow: ShadowRoot;
     private data: BadgeData | null = null;
     private retryCount = 0;
+    private dataSource: 'cache' | 'api' | 'estimate' = 'api';
+    private _loadId = 0;
+
+    // --- Public API ---
+
+    get badgeData(): BadgeData | null { return this.data; }
+    get co2Grams(): number | null { return this.data?.co2Grams ?? null; }
+    get score(): ScoreLetter | null { return this.data?.score ?? null; }
+    get cleanerThan(): number | null { return this.data?.cleanerThan ?? null; }
+    get pageWeightKb(): number | null { return this.data?.pageWeightKb ?? null; }
+
+    reload(): void {
+        this.retryCount = 0;
+        this.data = null;
+        this._loadId++;
+        this.renderLoading();
+        this.loadData();
+    }
 
     static get observedAttributes() {
-        return ['url', 'mode', 'theme', 'lang', 'cache-ttl', 'api-url', 'api-key', 'green-host'];
+        return ['url', 'mode', 'theme', 'cache-ttl', 'api-url', 'api-key', 'green-host'];
     }
 
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
+        // tabindex makes the host focusable so this.focus() works on retry
+        if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
     }
 
     // --- Attribute helpers ---
@@ -102,9 +95,6 @@ export class CometWebCarbonBadge extends HTMLElement {
         return (this.getAttribute('theme') as BadgeTheme) || 'dark';
     }
 
-    private get badgeLang(): string {
-        return this.getAttribute('lang') || 'en';
-    }
 
     private get cacheTtl(): number {
         const val = this.getAttribute('cache-ttl');
@@ -124,11 +114,8 @@ export class CometWebCarbonBadge extends HTMLElement {
     }
 
     private t(key: string, vars: Record<string, string | number> = {}): string {
-        const strings = I18N[this.badgeLang] || I18N.en;
-        let s = strings[key] || key;
-        for (const [k, v] of Object.entries(vars)) {
-            s = s.replace(`{${k}}`, String(v));
-        }
+        let s = STRINGS[key] ?? key;
+        for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, String(v));
         return s;
     }
 
@@ -149,7 +136,9 @@ export class CometWebCarbonBadge extends HTMLElement {
     // --- Data loading ---
 
     private async loadData() {
+        const loadId = ++this._loadId;
         const url = this.targetUrl;
+
         if (!url) {
             this.renderError();
             return;
@@ -158,46 +147,51 @@ export class CometWebCarbonBadge extends HTMLElement {
         if (isCacheValid(url, this.cacheTtl)) {
             const cached = getCached(url);
             if (cached) {
+                if (loadId !== this._loadId) return;
                 this.data = cached;
+                this.dataSource = 'cache';
                 this.renderBadge();
                 return;
             }
         }
 
         if (this.mode === 'estimate') {
-            this.runEstimate();
+            this.runEstimate(loadId);
         } else {
-            await this.fetchFromAPI(url);
+            await this.fetchFromAPI(url, loadId);
         }
     }
 
-    private runEstimate() {
+    private runEstimate(loadId = this._loadId) {
         try {
+            // Defer by one task to allow the loading render to paint before heavy estimation
             setTimeout(() => {
+                if (loadId !== this._loadId) return;
                 this.data = estimateCO2(this.greenHost);
+                this.dataSource = 'estimate';
                 setCache(this.targetUrl, this.data);
                 this.renderBadge();
-            }, 100);
+            }, 0);
         } catch {
             this.renderError();
         }
     }
 
-    private async fetchFromAPI(url: string) {
+    private async fetchFromAPI(url: string, loadId = this._loadId) {
         try {
             const params = new URLSearchParams({ url });
             params.set('source', 'badge');
-            if (this.apiKey) params.set('api_key', this.apiKey);
+            // api_key is sent via Authorization header, not URL, to avoid exposure in logs/history
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
+            const headers: Record<string, string> = { 'Accept': 'application/json' };
+            if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+
             const response = await fetch(
                 `${this.apiUrl}/public/carbon-badge?${params}`,
-                {
-                    headers: { 'Accept': 'application/json' },
-                    signal: controller.signal,
-                },
+                { headers, signal: controller.signal },
             ).finally(() => clearTimeout(timeoutId));
 
             if (response.status === 429) {
@@ -222,6 +216,8 @@ export class CometWebCarbonBadge extends HTMLElement {
             }
 
             const apiData: APIResponse = await response.json();
+            if (loadId !== this._loadId) return;
+
             const score = ALLOWED_SCORES.includes(apiData.score as ScoreLetter)
                 ? (apiData.score as ScoreLetter)
                 : 'F';
@@ -235,6 +231,7 @@ export class CometWebCarbonBadge extends HTMLElement {
                 greenHost: apiData.green_host,
                 timestamp: Date.now(),
             };
+            this.dataSource = 'api';
 
             setCache(url, this.data);
             this.retryCount = 0;
@@ -252,6 +249,25 @@ export class CometWebCarbonBadge extends HTMLElement {
                 this.renderError();
             }
         }
+    }
+
+    // --- Events ---
+
+    private dispatchBadgeEvent() {
+        if (!this.data) return;
+        this.dispatchEvent(new CustomEvent('cometweb:badge-load', {
+            bubbles: true,
+            composed: true,
+            detail: {
+                url: this.data.url,
+                co2Grams: this.data.co2Grams,
+                score: this.data.score,
+                cleanerThan: this.data.cleanerThan,
+                pageWeightKb: this.data.pageWeightKb,
+                greenHost: this.data.greenHost,
+                source: this.dataSource,
+            },
+        }));
     }
 
     // --- Render methods ---
@@ -312,6 +328,7 @@ export class CometWebCarbonBadge extends HTMLElement {
         </a>
       </div>
     `;
+        this.dispatchBadgeEvent();
     }
 
     private renderError() {
@@ -328,13 +345,18 @@ export class CometWebCarbonBadge extends HTMLElement {
           <div class="cw-content">
             <div class="cw-title">${safeError}</div>
             <div class="cw-error-actions">
-              <button class="cw-retry-btn">${safeRetry}</button>
+              <button type="button" class="cw-retry-btn">${safeRetry}</button>
             </div>
           </div>
           <div class="cw-footer" aria-hidden="true">Verified by CometWeb</div>
         </div>
       </div>
     `;
+        this.dispatchEvent(new CustomEvent('cometweb:badge-error', {
+            bubbles: true,
+            composed: true,
+            detail: { url: this.targetUrl },
+        }));
 
         const btn = this.shadow.querySelector<HTMLButtonElement>('.cw-retry-btn');
         if (btn) {

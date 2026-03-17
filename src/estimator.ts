@@ -71,12 +71,14 @@ function measurePageWeight(): number {
             if (total > 0) return total;
         }
     } catch {
+        console.warn('[CometWeb Carbon Badge] Performance Resource Timing API unavailable, falling back to DOM size estimation.');
     }
 
     try {
         const html = document.documentElement?.outerHTML || '';
         return html.length * 1.3;
     } catch {
+        console.warn('[CometWeb Carbon Badge] DOM size estimation failed, using default 500KB fallback.');
         return 500 * 1024;
     }
 }
