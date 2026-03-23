@@ -1,5 +1,16 @@
 import type { BadgeTheme } from './types';
 
+const styleCache = new Map<BadgeTheme, CSSStyleSheet>();
+
+export function getStyleSheet(theme: BadgeTheme): CSSStyleSheet {
+  const cached = styleCache.get(theme);
+  if (cached) return cached;
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync(getStyles(theme));
+  styleCache.set(theme, sheet);
+  return sheet;
+}
+
 const BASE_STYLES = `
   :host {
     display: inline-block;

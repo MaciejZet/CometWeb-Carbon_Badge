@@ -8,13 +8,18 @@
 import type { BadgeData, BadgeTheme, BadgeMode, ScoreLetter, APIResponse } from './types';
 import { getCached, isCacheValid, setCache, clearExpired } from './cache';
 import { estimateCO2, co2ToScore } from './estimator';
-import { getStyles } from './styles';
+import { getStyleSheet } from './styles';
 
-const DEFAULT_API_URL = 'https://api.cometweb.io/api';
+const DEFAULT_API_URL = 'https://app.cometweb.io/api';
 const DEFAULT_CACHE_TTL = 720; // 12 hours in minutes
 const MAX_RETRIES = 3;
 const API_TIMEOUT_MS = 5000;
 const ALLOWED_SCORES: ScoreLetter[] = ['A+', 'A', 'B', 'C', 'D', 'F'];
+const LOG_PREFIX = '[CometWeb Carbon Badge]';
+const SCORE_CLASS_MAP: Record<string, string> = {
+    'A+': 'grade-aplus', 'A': 'grade-a', 'B': 'grade-b',
+    'C': 'grade-c', 'D': 'grade-d', 'F': 'grade-f',
+};
 
 function toFiniteNumber(value: unknown, fallback: number): number {
     const n = typeof value === 'number' ? value : Number(value);
@@ -34,18 +39,6 @@ function escapeHtml(value: string): string {
         .replace(/'/g, '&#39;');
 }
 
-const STRINGS: Record<string, string> = {
-    visit: 'visit',
-    cleanerThanPrefix: 'Cleaner than',
-    cleanerThanSuffix: 'of web',
-    poweredBy: 'Powered by CometWeb',
-    loading: 'Measuring…',
-    error: 'Unable to calculate',
-    retry: 'Retry',
-    ariaLabel: 'Carbon footprint: {co2}g CO₂e per visit, score {score}',
-    ariaLoading: 'Calculating carbon footprint…',
-    ariaError: 'Carbon footprint calculation failed',
-};
 
 export class CometWebCarbonBadge extends HTMLElement {
     private shadow: ShadowRoot;
@@ -77,6 +70,7 @@ export class CometWebCarbonBadge extends HTMLElement {
     constructor() {
         super();
         this.shadow = this.attachShadow({ mode: 'open' });
+        this.shadow.adoptedStyleSheets = [getStyleSheet(this.theme)];
         // tabindex makes the host focusable so this.focus() works on retry
         if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
     }
@@ -102,7 +96,8 @@ export class CometWebCarbonBadge extends HTMLElement {
     }
 
     private get apiUrl(): string {
-        return this.getAttribute('api-url') || DEFAULT_API_URL;
+        const configured = this.getAttribute('api-url');
+        return (configured?.trim() || DEFAULT_API_URL).replace(/\/+$/, '');
     }
 
     private get apiKey(): string | null {
@@ -111,12 +106,6 @@ export class CometWebCarbonBadge extends HTMLElement {
 
     private get greenHost(): boolean {
         return this.getAttribute('green-host') === 'true';
-    }
-
-    private t(key: string, vars: Record<string, string | number> = {}): string {
-        let s = STRINGS[key] ?? key;
-        for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, String(v));
-        return s;
     }
 
     // --- Lifecycle ---
@@ -183,11 +172,11 @@ export class CometWebCarbonBadge extends HTMLElement {
             params.set('source', 'badge');
             // api_key is sent via Authorization header, not URL, to avoid exposure in logs/history
 
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-
             const headers: Record<string, string> = { 'Accept': 'application/json' };
             if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
             const response = await fetch(
                 `${this.apiUrl}/public/carbon-badge?${params}`,
@@ -206,7 +195,7 @@ export class CometWebCarbonBadge extends HTMLElement {
                     return;
                 }
 
-                console.warn('[CometWeb Carbon Badge] API rate limited, falling back to estimate mode.');
+                console.warn(LOG_PREFIX, 'API rate limited, falling back to estimate mode.');
                 this.runEstimate();
                 return;
             }
@@ -239,7 +228,7 @@ export class CometWebCarbonBadge extends HTMLElement {
         } catch (error) {
             const isAbort = error instanceof DOMException && error.name === 'AbortError';
             if (isAbort) {
-                console.warn('[CometWeb Carbon Badge] API request timed out, falling back to estimate mode.');
+                console.warn(LOG_PREFIX, 'API request timed out, falling back to estimate mode.');
             }
 
             if (this.retryCount < MAX_RETRIES) {
@@ -272,19 +261,19 @@ export class CometWebCarbonBadge extends HTMLElement {
 
     // --- Render methods ---
 
+    private updateStyles() {
+        this.shadow.adoptedStyleSheets = [getStyleSheet(this.theme)];
+    }
+
     private renderLoading() {
-        const styles = getStyles(this.theme);
-                const safeAriaLoading = escapeHtml(this.t('ariaLoading'));
-                const safeLoading = escapeHtml(this.t('loading'));
-                const safePoweredBy = escapeHtml(this.t('poweredBy'));
+        this.updateStyles();
         this.shadow.innerHTML = `
-      <style>${styles}</style>
-      <div role="status" aria-live="polite" aria-label="${safeAriaLoading}">
+      <div role="status" aria-live="polite" aria-label="Calculating carbon footprint\u2026">
         <div class="cw-badge loading">
-          <div class="cw-grade grade-unknown" aria-hidden="true">…</div>
+          <div class="cw-grade grade-unknown" aria-hidden="true">\u2026</div>
           <div class="cw-content">
-            <div class="cw-title">${safeLoading}</div>
-            <div class="cw-subtitle">${safePoweredBy}</div>
+            <div class="cw-title">Measuring\u2026</div>
+            <div class="cw-subtitle">Powered by CometWeb</div>
           </div>
         </div>
       </div>
@@ -297,31 +286,26 @@ export class CometWebCarbonBadge extends HTMLElement {
         const co2Grams = Math.max(0, toFiniteNumber(this.data.co2Grams, 0));
         const score = ALLOWED_SCORES.includes(this.data.score) ? this.data.score : 'F';
         const cleanerThan = clamp(toFiniteNumber(this.data.cleanerThan, 0), 0, 100);
-        const styles = getStyles(this.theme);
-        const scoreClass = this.getScoreClass(score);
-        const co2Display = co2Grams < 0.01 ? '<0.01' : co2Grams.toFixed(2);
-                const safeCo2Display = escapeHtml(co2Display);
-                const safeScore = escapeHtml(score);
-                const safeCleanerThan = escapeHtml(cleanerThan.toString());
-                const safeVisit = escapeHtml(this.t('visit') || 'visit');
-                const safeCleanerPrefix = escapeHtml(this.t('cleanerThanPrefix') || 'Cleaner than');
-                const safeCleanerSuffix = escapeHtml(this.t('cleanerThanSuffix') || 'of web');
-                const safeAria = escapeHtml(this.t('ariaLabel', { co2: co2Display, score }));
-        const themeClass = this.theme; // 'dark' or 'light'
+        const scoreClass = SCORE_CLASS_MAP[score] || 'grade-unknown';
+        const co2Display = co2Grams < 0.01 ? '&lt;0.01' : escapeHtml(co2Grams.toFixed(2));
+        const safeScore = escapeHtml(score);
+        const safeCleanerThan = escapeHtml(cleanerThan.toString());
+        const aria = `Carbon footprint: ${co2Grams.toFixed(2)}g CO\u2082e per visit, score ${score}`;
+        const safeAria = escapeHtml(aria);
 
+        this.updateStyles();
         this.shadow.innerHTML = `
-      <style>${styles}</style>
       <div role="status" aria-live="polite" aria-label="${safeAria}">
-        <a class="cw-badge ${themeClass}"
+        <a class="cw-badge ${this.theme}"
            href="https://cometweb.io/insight/ecology"
            target="_blank"
            rel="noopener noreferrer"
            aria-label="${safeAria} — CometWeb (opens in new tab)">
           <div class="cw-grade ${scoreClass}" aria-hidden="true">${safeScore}</div>
           <div class="cw-content">
-            <div class="cw-title">${safeCo2Display}g CO₂e <small>/ ${safeVisit}</small></div>
+            <div class="cw-title">${co2Display}g CO\u2082e <small>/ visit</small></div>
             <div class="cw-subtitle">
-              ${safeCleanerPrefix} <span class="cw-highlight">${safeCleanerThan}%</span> ${safeCleanerSuffix}
+              Cleaner than <span class="cw-highlight">${safeCleanerThan}%</span> of web
             </div>
           </div>
           <div class="cw-footer" aria-hidden="true">Verified by CometWeb</div>
@@ -332,20 +316,15 @@ export class CometWebCarbonBadge extends HTMLElement {
     }
 
     private renderError() {
-        const styles = getStyles(this.theme);
-                const safeAriaError = escapeHtml(this.t('ariaError'));
-                const safeError = escapeHtml(this.t('error'));
-                const safeRetry = escapeHtml(this.t('retry'));
-
+        this.updateStyles();
         this.shadow.innerHTML = `
-      <style>${styles}</style>
-      <div role="status" aria-live="polite" aria-label="${safeAriaError}">
+      <div role="status" aria-live="polite" aria-label="Carbon footprint calculation failed">
         <div class="cw-badge error">
           <div class="cw-grade grade-f" aria-hidden="true">!</div>
           <div class="cw-content">
-            <div class="cw-title">${safeError}</div>
+            <div class="cw-title">Unable to calculate</div>
             <div class="cw-error-actions">
-              <button type="button" class="cw-retry-btn">${safeRetry}</button>
+              <button type="button" class="cw-retry-btn">Retry</button>
             </div>
           </div>
           <div class="cw-footer" aria-hidden="true">Verified by CometWeb</div>
@@ -370,15 +349,4 @@ export class CometWebCarbonBadge extends HTMLElement {
         }
     }
 
-    private getScoreClass(score: ScoreLetter): string {
-        const map: Record<string, string> = {
-            'A+': 'grade-aplus',
-            'A': 'grade-a',
-            'B': 'grade-b',
-            'C': 'grade-c',
-            'D': 'grade-d',
-            'F': 'grade-f',
-        };
-        return map[score] || 'grade-unknown';
-    }
 }

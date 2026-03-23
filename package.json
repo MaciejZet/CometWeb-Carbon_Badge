@@ -1,6 +1,6 @@
 {
     "name": "@cometweb/carbon-badge",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "description": "Lightweight web component badge showing CO₂e emissions per page view — powered by CometWeb & SWDM v4",
     "main": "dist/cometweb-carbon-badge.umd.js",
     "module": "dist/cometweb-carbon-badge.esm.js",
@@ -13,7 +13,9 @@
         }
     },
     "files": [
-        "dist",
+        "dist/**/*.js",
+        "dist/**/*.d.ts",
+        "!dist/__tests__",
         "README.md",
         "LICENSE",
         "CHANGELOG.md"

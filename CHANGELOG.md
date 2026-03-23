@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.5] — 2026-03-23
+
+### Fixed
+- **CORS error with `api.cometweb.io`** — the default API URL pointed to `https://api.cometweb.io/api` which does not exist, causing `Cross-Origin Request Blocked` errors in browsers. Changed default to `https://app.cometweb.io/api`.
+
+### Changed
+- **Removed multi-URL fallback mechanism** — the `apiUrls` getter (array with fallback) has been simplified back to a single `apiUrl` getter. The fallback to `api.cometweb.io` was never useful since that host doesn't resolve.
+- **Simplified `fetchFromAPI`** — removed the loop-based fallback logic, returning to a straightforward single-endpoint fetch with retry and estimate fallback.
+- **`adoptedStyleSheets` instead of inline `<style>`** — CSS is now parsed once per theme and shared via `CSSStyleSheet` + `adoptedStyleSheets`, eliminating duplicate style strings on every render cycle.
+- **Removed i18n scaffolding** — `STRINGS` dictionary and `t()` interpolation method removed; all UI strings are now inlined (English only). Reduces bundle size with no functional change.
+- **`escapeHtml` only on dynamic data** — static labels no longer pass through `escapeHtml()`; only API/user-supplied values (CO₂, score, percentage) are escaped.
+- **Module-level constants** — `SCORE_CLASS_MAP` and `LOG_PREFIX` extracted from methods to module scope, avoiding per-call object allocation.
+- **Terser optimization** — enabled `toplevel`, `module`, and increased compression passes to 3. Bundle size reduced from ~5.2 KB to **4.6 KB gzipped** (ESM).
+
+---
+
 ## [1.0.4] — 2026-03-17
 
 ### Fixed

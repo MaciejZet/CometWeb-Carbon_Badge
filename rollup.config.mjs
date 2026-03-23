@@ -28,9 +28,13 @@ export default {
             compress: {
                 // Strip console.log in production but keep console.warn/error for diagnostics
                 drop_console: isProd ? ['log'] : [],
-                passes: 2,
+                passes: 3,
+                toplevel: true,
             },
-            mangle: isProd,
+            mangle: {
+                toplevel: true,
+            },
+            module: true,
         }),
     ],
 };
