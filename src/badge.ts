@@ -170,6 +170,9 @@ export class CometWebCarbonBadge extends HTMLElement {
         try {
             const params = new URLSearchParams({ url });
             params.set('source', 'badge');
+            try {
+                params.set('badge_origin', window.location.hostname);
+            } catch { /* SSR / non-browser — skip */ }
             // api_key is sent via Authorization header, not URL, to avoid exposure in logs/history
 
             const headers: Record<string, string> = { 'Accept': 'application/json' };
